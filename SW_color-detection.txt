@@ -1,0 +1,103 @@
+import cv2
+import numpy as np
+import serial
+
+# Initialiser la capture vidéo avec l'adresse IP et le port du flux de la webcam
+cap = cv2.VideoCapture("http://10.100.70.74:8080/video")
+
+# Initialiser la communication série avec Arduino sur COM11
+ser = serial.Serial('COM11', 115200, timeout=1)
+
+# Définir les paramètres de police pour l'affichage de texte sur l'image
+font = cv2.FONT_HERSHEY_SIMPLEX
+
+def create_color_mask(hsv_frame, lower_bound, upper_bound):
+    """Créer un masque pour une plage de couleur spécifique dans un cadre HSV."""
+    return cv2.inRange(hsv_frame, lower_bound, upper_bound)
+
+def search_contours(frame, mask, color_name):
+    """Trouver les contours dans le masque, les dessiner sur le cadre et les étiqueter avec le nom de la couleur."""
+    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    contours_count = 0
+
+    for contour in contours:
+        area = cv2.contourArea(contour)
+        if 4000 < area < 20000:
+            w
+            cv2.drawContours(frame, [contour], -1, (0, 255, 0), 2)
+            contours_count += 1
+
+            M = cv2.moments(contour)
+            if M["m00"] != 0:
+                cX = int(M["m10"] / M["m00"])
+                cY = int(M["m01"] / M["m00"])
+            else:
+                cX, cY = 0, 0
+            cv2.circle(frame, (cX, cY), 3, (255, 255, 255), -1)
+            cv2.putText(frame, f"{color_name} {contours_count}", (cX - 25, cY - 25), font, 0.5, (255, 255, 255), 2)
+
+    return contours_count
+
+# Variable pour suivre la dernière commande envoyée à l'Arduino
+last_command = None
+
+while True:
+    ret, frame = cap.read()
+
+    if not ret:
+        continue
+
+    hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+
+    # Définir les plages de couleurs pour le rouge, le vert et le bleu
+    lower_red1 = np.array([0, 120, 70])
+    upper_red1 = np.array([10, 255, 255])
+    lower_red2 = np.array([170, 120, 70])
+    upper_red2 = np.array([180, 255, 255])
+
+    lower_green = np.array([35, 100, 100])
+    upper_green = np.array([85, 255, 255])
+
+    lower_blue = np.array([90, 50, 50])
+    upper_blue = np.array([130, 255, 255])
+
+    # Créer des masques pour le rouge, le vert et le bleu
+    mask_red1 = create_color_mask(hsv, lower_red1, upper_red1)
+    mask_red2 = create_color_mask(hsv, lower_red2, upper_red2)
+    mask_red = cv2.bitwise_or(mask_red1, mask_red2)
+
+    mask_green = create_color_mask(hsv, lower_green, upper_green)
+    mask_blue = create_color_mask(hsv, lower_blue, upper_blue)
+
+    # Rechercher et dessiner les contours pour chaque couleur
+    red_count = search_contours(frame, mask_red, 'Red')
+    green_count = search_contours(frame, mask_green, 'Green')
+    blue_count = search_contours(frame, mask_blue, 'Blue')
+
+    total_count = red_count + green_count + blue_count
+    cv2.putText(frame, f'Total: {total_count}', (5, 30), font, 1, (255, 0, 255), 2, cv2.LINE_AA)
+
+    # Envoyer une commande à Arduino en fonction de la couleur détectée
+    if blue_count > 0:
+        command = b'B'
+    elif red_count > 0:
+        command = b'R'
+    elif green_count > 0:
+        command = b'G'
+    else:
+        command = b'O'  # Envoyer 'O' pour éteindre si aucune couleur n'est détectée
+
+    if command != last_command:
+        ser.write(command)
+        last_command = command
+
+    # Afficher les masques et l'image traitée
+    cv2.imshow('mask', cv2.bitwise_or(cv2.bitwise_or(mask_red, mask_green), mask_blue))
+    cv2.imshow('image', frame)
+
+    if cv2.waitKey(1) & 0xFF == 27:  # Sortir si la touche 'ESC' est pressée
+        break
+
+cap.release()
+cv2.destroyAllWindows()
+ser.close()
